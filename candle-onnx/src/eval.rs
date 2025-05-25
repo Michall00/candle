@@ -1955,6 +1955,24 @@ fn simple_eval_(
                 let output = input.sign()?;
                 values.insert(node.output[0].clone(), output);
             }
+            // https://onnx.ai/onnx/operators/onnx__LayerNormalization.html
+            "LayerNormalization" => {
+                let x = get(&node.input[0])?;
+                let shape = x.shape();
+                let rank = shape.rank();
+
+                let axis = rank - 1;
+                let epsilon = 1e-5;
+
+                let mean = x.mean(axis)?.unsqueeze(axis)?;
+                let centered = x.broadcast_sub(&mean)?;
+
+                let var = centered.sqr()?.mean(axis)?.unsqueeze(axis)?;
+                let inv_std = (var + epsilon)?.sqrt()?.recip()?;
+
+                let y = centered.broadcast_mul(&inv_std)?;
+                values.insert(node.output[0].clone(), y);
+            }
             op_type => bail!("unsupported op_type {op_type} for op {node:?}"),
         }
     }
