@@ -1961,42 +1961,31 @@ fn simple_eval_(
                 let shape = x.shape();
                 let rank = shape.rank();
 
-                let epsilon = get_attr(node, "epsilon").copied().unwrap_or(1e-5);
-                let axis = get_attr(node, "axis").copied().unwrap_or(-1);
-                let axis = if axis < 0 {
-                    (rank as i64 + axis) as usize
-                } else {
-                    axis as usize
-                };
+                let axis = rank - 1;
+                let epsilon = 1e-5;
 
-                let norm_shape = &shape.dims()[axis..];
-                let outer = shape.dims()[..axis].iter().product::<usize>();
-                let reshaped = x.reshape(&[outer, norm_shape.iter().product::<usize>()])?;
+                let mean = x.mean(axis)?.unsqueeze(axis)?;
+                let centered = x.broadcast_sub(&mean)?;
 
-                let mean = reshaped.mean(1)?.unsqueeze(1)?;
-                let centered = reshaped.broadcast_sub(&mean)?;
+                let var = centered.sqr()?.mean(axis)?.unsqueeze(axis)?;
+                let inv_std = (var + epsilon)?.sqrt()?.recip()?;
 
-                let var = centered.sqr()?.mean(1)?.unsqueeze(1)?;
-                let eps_tensor = Tensor::full(epsilon, var.shape().dims(), &var.device())?;
-                let inv_std = (&var + &eps_tensor)?.sqrt()?.recip()?;
-
-                let mut norm = centered.broadcast_mul(&inv_std)?;
-                norm = norm.reshape(shape)?;
+                let mut y = centered.broadcast_mul(&inv_std)?;
 
                 if let Some(scale_name) = node.input.get(1) {
                     if !scale_name.is_empty() {
                         let scale = get(scale_name)?;
-                        norm = norm.broadcast_mul(&scale)?;
+                        y = y.broadcast_mul(&scale)?;
                     }
                 }
 
                 if let Some(bias_name) = node.input.get(2) {
                     if !bias_name.is_empty() {
                         let bias = get(bias_name)?;
-                        norm = norm.broadcast_add(&bias)?;
+                        y = y.broadcast_add(&bias)?;
                     }
                 }
-                values.insert(node.output[0].clone(), norm);
+                values.insert(node.output[0].clone(), y);
             }
             "HardSwish" => {
                 let input = get(&node.input[0])?;
