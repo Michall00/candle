@@ -39,7 +39,7 @@ impl super::Module for Activation {
             Self::HardSigmoid => crate::ops::hard_sigmoid(xs),
             Self::Swiglu => crate::ops::swiglu(xs),
             Self::Swish => xs * crate::ops::sigmoid(xs)?,
-            Self::HardSwish => xs * crate::ops::hard_sigmoid(xs)?,
+            Self::HardSwish => xs * crate::ops::hard_swish(xs)?,
             &Self::Elu(alpha) => xs.elu(alpha),
             &Self::LeakyRelu(negative_slope) => crate::ops::leaky_relu(xs, negative_slope),
             Self::GeluPytorchTanh => xs.gelu(),
