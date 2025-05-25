@@ -5913,43 +5913,103 @@ fn test_sign_operation() -> Result<()> {
 
 
 #[test]
-fn test_layer_norm_simple() -> Result<()> {
-    let manual_graph = create_model_proto_with_graph(Some(GraphProto {
-        node: vec![NodeProto {
-            op_type: "LayerNormalization".to_string(),
-            domain: "".to_string(),
-            attribute: vec![],
-            input: vec![INPUT_X.to_string()],
-            output: vec![OUTPUT_Z.to_string()],
+fn test_layer_normalization() -> Result<()> {
+    // === Test 1: Default test ===
+    {
+        println!("Running LayerNormalization test without scale and bias...");
+        let manual_graph = create_model_proto_with_graph(Some(GraphProto {
+            node: vec![NodeProto {
+                op_type: "LayerNormalization".to_string(),
+                domain: "".to_string(),
+                attribute: vec![],
+                input: vec![INPUT_X.to_string()],
+                output: vec![OUTPUT_Z.to_string()],
+                ..Default::default()
+            }],
+            initializer: vec![],
+            input: vec![],
+            output: vec![ValueInfoProto {
+                name: OUTPUT_Z.to_string(),
+                ..Default::default()
+            }],
             ..Default::default()
-        }],
-        initializer: vec![],
-        input: vec![],
-        output: vec![ValueInfoProto {
-            name: OUTPUT_Z.to_string(),
+        }));
+
+        let mut inputs: HashMap<String, Tensor> = HashMap::new();
+        let x_data = Tensor::new(&[[1f32, 2., 3.], [4., 5., 6.]], &Device::Cpu)?;
+        inputs.insert(INPUT_X.to_string(), x_data);
+
+        let eval = simple_eval(&manual_graph, inputs)?;
+        let output = eval.get(OUTPUT_Z).expect("Output not found");
+        let result = output.to_vec2::<f32>()?;
+
+        for row in result {
+            let mean: f32 = row.iter().sum::<f32>() / row.len() as f32;
+            let var: f32 = row.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / row.len() as f32;
+            let std = var.sqrt();
+            for v in row {
+                let expected = (v - mean) / (std + 1e-5);
+                assert!((v - expected).abs() < 1e-4, "Mismatch: got {}, expected {}", v, expected);
+            }
+        }
+    }
+
+    // === Test 2: with scale and bias ===
+    {
+        println!("Running LayerNormalization test with scale and bias...");
+        const SCALE: &str = "scale";
+        const BIAS: &str = "bias";
+
+        let manual_graph = create_model_proto_with_graph(Some(GraphProto {
+            node: vec![NodeProto {
+                op_type: "LayerNormalization".to_string(),
+                input: vec![INPUT_X.to_string(), SCALE.to_string(), BIAS.to_string()],
+                output: vec![OUTPUT_Z.to_string()],
+                ..Default::default()
+            }],
+            initializer: vec![
+                TensorProto {
+                    name: SCALE.to_string(),
+                    dims: vec![3],
+                    data_type: 1, // FLOAT
+                    float_data: vec![1.0, 1.0, 1.0],
+                    ..Default::default()
+                },
+                TensorProto {
+                    name: BIAS.to_string(),
+                    dims: vec![3],
+                    data_type: 1,
+                    float_data: vec![0.5, 0.5, 0.5],
+                    ..Default::default()
+                },
+            ],
+            input: vec![],
+            output: vec![ValueInfoProto {
+                name: OUTPUT_Z.to_string(),
+                ..Default::default()
+            }],
             ..Default::default()
-        }],
-        ..Default::default()
-    }));
+        }));
 
-    let mut inputs: HashMap<String, Tensor> = HashMap::new();
-    let x_data = Tensor::new(
-        &[[1f32, 2., 3.], [4., 5., 6.]],
-        &candle::Device::Cpu,
-    )?;
-    inputs.insert(INPUT_X.to_string(), x_data);
+        let mut inputs: HashMap<String, Tensor> = HashMap::new();
+        let x = Tensor::new(&[[1f32, 2., 3.], [4., 5., 6.]], &Device::Cpu)?;
+        inputs.insert(INPUT_X.to_string(), x);
 
-    let eval = simple_eval(&manual_graph, inputs)?;
-    let output = eval.get(OUTPUT_Z).expect("Output not found");
+        let eval = simple_eval(&manual_graph, inputs)?;
+        let result = eval
+            .get(OUTPUT_Z)
+            .expect("missing output")
+            .to_vec2::<f32>()?;
 
-    let result = output.to_vec2::<f32>()?;
-    for row in result {
-        let mean: f32 = row.iter().sum::<f32>() / row.len() as f32;
-        let var: f32 = row.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / row.len() as f32;
-        let std = var.sqrt();
-        for v in row {
-            let z = (v - mean) / (std + 1e-5);
-            assert!((z - v).abs() < 1e-4, "Mismatch: got {}, expected {}", v, z);
+        assert_eq!(result.len(), 2);
+        for row in result {
+            assert_eq!(row.len(), 3);
+            let mean: f32 = row.iter().sum::<f32>() / 3.0;
+            assert!(
+                (mean - 0.5).abs() < 1e-4,
+                "Expected mean ≈ 0.5, got mean={}",
+                mean
+            );
         }
     }
 

@@ -1970,7 +1970,21 @@ fn simple_eval_(
                 let var = centered.sqr()?.mean(axis)?.unsqueeze(axis)?;
                 let inv_std = (var + epsilon)?.sqrt()?.recip()?;
 
-                let y = centered.broadcast_mul(&inv_std)?;
+                let mut y = centered.broadcast_mul(&inv_std)?;
+
+                if let Some(scale_name) = node.input.get(1) {
+                    if !scale_name.is_empty() {
+                        let scale = get(scale_name)?;
+                        y = y.broadcast_mul(&scale)?;
+                    }
+                }
+
+                if let Some(bias_name) = node.input.get(2) {
+                    if !bias_name.is_empty() {
+                        let bias = get(bias_name)?;
+                        y = y.broadcast_add(&bias)?;
+                    }
+                }
                 values.insert(node.output[0].clone(), y);
             }
             op_type => bail!("unsupported op_type {op_type} for op {node:?}"),
